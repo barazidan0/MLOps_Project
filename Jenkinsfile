@@ -1,6 +1,11 @@
 pipeline {
     agent any
 
+    environment {
+        DOCKER_IMAGE = "mlops-image"
+        CONTAINER_NAME = "mlops-container"
+    }
+
     stages {
         stage('Checkout') {
             steps {
@@ -11,25 +16,23 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh 'docker build -t mlops-image .'
+                    bat "docker build -t %DOCKER_IMAGE% ."
                 }
             }
         }
 
-        stage('Run Pipeline Script') {
+        stage('Test') {
             steps {
-                script {
-                    sh 'docker run --rm mlops-image python eda_of_netflix_dataset.py'
-                }
+                bat "python eda_of_netflix_dataset.py"
             }
         }
 
         stage('Deploy') {
             steps {
                 script {
-                    sh 'docker stop mlops-container || true'
-                    sh 'docker rm mlops-container || true'
-                    sh 'docker run -d --name mlops-container -p 5000:5000 mlops-image'
+                    bat "docker stop %CONTAINER_NAME% || exit 0"
+                    bat "docker rm %CONTAINER_NAME% || exit 0"
+                    bat "docker run -d --name %CONTAINER_NAME% -p 5000:5000 %DOCKER_IMAGE%"
                 }
             }
         }
@@ -41,3 +44,4 @@ pipeline {
         }
     }
 }
+
