@@ -1,4 +1,4 @@
-# Netflix Clustering MLOps Project
+# Netflix MLOps Project
 
 ## 📊 Deskripsi Proyek
 
