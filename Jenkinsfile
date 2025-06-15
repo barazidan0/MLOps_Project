@@ -4,7 +4,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git url: 'https://github.com/barazidan0/MLOps_Project.git', credentialsId: '00546df9-28a0-477a-b1ed-362be2644cca'
+                git branch: 'main', url: 'https://github.com/barazidan0/MLOps_Project.git', credentialsId: '00546df9-28a0-477a-b1ed-362be2644cca'
             }
         }
 
