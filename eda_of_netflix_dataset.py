@@ -14,7 +14,14 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import mlflow
+import mlflow.sklearn
 # %matplotlib inline
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score, silhouette_samples, calinski_harabasz_score, davies_bouldin_score
+
+! pip install mlflow
 
 """# Loading csv"""
 
@@ -145,10 +152,6 @@ pre_df['imdb_votes'] = np.log(pre_df['imdb_votes'] + 1)
 pre_df['tmdb_popularity'] = np.log(pre_df['tmdb_popularity'] + 1)
 pre_df.describe()
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import numpy as np # Ensure numpy is imported for np.log
-
 # Plot histograms to see the distribution
 fig, axs = plt.subplots(2, 2, figsize=(14, 10))
 
@@ -170,51 +173,83 @@ axs[1, 1].set_title('TMDB Score')
 plt.tight_layout()
 plt.show()
 
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# (1) Asumsikan df2 sudah ada dari sebelumnya, gunakan pre_df:
+# Persiapan data
 pre_df = df2[['title', 'imdb_score', 'imdb_votes', 'tmdb_popularity', 'tmdb_score']].copy()
+pre_df['imdb_votes'] = np.log(pre_df['imdb_votes'] + 1)  # Transformasi log untuk mengurangi skewness
+pre_df['tmdb_popularity'] = np.log(pre_df['tmdb_popularity'] + 1)  # Transformasi log
 
-# (2) Log Transform (untuk mengurangi skewness)
-pre_df.loc[:, 'imdb_votes'] = np.log(pre_df['imdb_votes'] + 1)
-pre_df.loc[:, 'tmdb_popularity'] = np.log(pre_df['tmdb_popularity'] + 1)
+# Melakukan standarisasi data
+X_scaled = StandardScaler().fit_transform(pre_df[['imdb_score', 'imdb_votes', 'tmdb_popularity', 'tmdb_score']])
 
-# (3) Tidak ada pembuatan target, karena ini unsupervised
+# Inisialisasi dan training model KMeans
+kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)  # Tambahkan n_init untuk stabilitas
+pre_df['cluster'] = kmeans.fit_predict(X_scaled)  # Menambahkan hasil cluster ke dataframe
 
-# (4) Ambil fitur yang akan dipakai
-features = ['imdb_score', 'imdb_votes', 'tmdb_popularity', 'tmdb_score']
-X = pre_df[features]
+# Inisialisasi eksperimen MLflow
+mlflow.set_experiment("KMeans Netflix")
 
-# (5) Scaling fitur numerik pakai StandardScaler
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
+# Mengakhiri run aktif sebelumnya (jika ada)
+mlflow.end_run()
 
-# Convert ke dataframe kembali untuk kemudahan
-X_scaled_df = pd.DataFrame(X_scaled, columns=features)
+# Memulai pencatatan run baru
+with mlflow.start_run():
+    mlflow.log_param("model", "KMeans")  # Mencatat jenis model
+    n_clusters = 3  # Jumlah cluster yang digunakan
+    mlflow.log_param("clusters", n_clusters)  # Mencatat jumlah cluster
 
-# (6) Clustering dengan KMeans
-kmeans = KMeans(n_clusters=3, random_state=42)
-pre_df['cluster'] = kmeans.fit_predict(X_scaled_df)
+    from sklearn.metrics import silhouette_score, silhouette_samples  # Impor fungsi evaluasi
 
-# (7) Lihat hasil clustering
-print(pre_df[['title', 'cluster']].head())
+    # Menghitung dan mencatat skor silhouette
+    silhouette_avg = silhouette_score(X_scaled, pre_df['cluster'])
+    ch_score = calinski_harabasz_score(X_scaled, pre_df['cluster'])
+    db_score = davies_bouldin_score(X_scaled, pre_df['cluster'])
 
-# (8) Visualisasi hasil clustering (pakai 2 fitur utama contoh: imdb_score dan tmdb_score)
-plt.figure(figsize=(10,6))
-sns.scatterplot(x=X_scaled_df['imdb_score'],
-                y=X_scaled_df['tmdb_score'],
-                hue=pre_df['cluster'],
-                palette='viridis')
-plt.title("Clustering KMeans (imdb_score vs tmdb_score)")
-plt.xlabel("imdb_score (scaled)")
-plt.ylabel("tmdb_score (scaled)")
-plt.show()
+    mlflow.log_metric("silhouette", silhouette_avg)
+    mlflow.log_metric("calinski_harabasz_score", ch_score)
+    mlflow.log_metric("davies_bouldin_score", db_score)
 
-# (9) Summary jumlah data per cluster
-print("\nJumlah data per cluster:")
-print(pre_df['cluster'].value_counts())
+    # Simpan model ke MLflow
+    mlflow.sklearn.log_model(kmeans, "model")
+
+    # Visualisasi hasil clustering
+    plt.figure(figsize=(8, 5))
+    sns.scatterplot(x=X_scaled[:, 0], y=X_scaled[:, -1], hue=pre_df['cluster'], palette='viridis')
+    plt.title("Clustering (imdb_score vs tmdb_score)")
+    plt.savefig("cluster.png")  # Simpan gambar
+    mlflow.log_artifact("cluster.png")  # Upload ke MLflow
+    plt.show()
+
+    # Visualisasi plot silhouette
+    silhouette_vals = silhouette_samples(X_scaled, pre_df['cluster'])  # Hitung nilai silhouette
+    plt.figure(figsize=(10, 6))
+
+    y_lower = 10
+    unique_clusters = sorted(pre_df['cluster'].unique())  # Ambil label cluster unik
+    for i in unique_clusters:
+        ith_vals = silhouette_vals[pre_df['cluster'] == i]
+        ith_vals.sort()
+        size_cluster_i = ith_vals.shape[0]
+        y_upper = y_lower + size_cluster_i
+        color = plt.cm.nipy_spectral(float(i) / n_clusters)
+        plt.fill_betweenx(np.arange(y_lower, y_upper),
+                          0, ith_vals,
+                          facecolor=color, edgecolor=color, alpha=0.7)
+
+        # Beri label angka cluster di tengah plotnya
+        plt.text(-0.05, y_lower + 0.5 * size_cluster_i, str(i))
+
+        # Ubah posisi bawah untuk cluster berikutnya
+        y_lower = y_upper + 10
+
+    plt.axvline(x=silhouette_avg, color="red", linestyle="--")  # Garis rata-rata silhouette
+    plt.xlabel("Nilai Koefisien Silhouette")
+    plt.ylabel("Label Cluster")
+    plt.title("Plot Silhouette untuk Setiap Cluster")
+    plt.savefig("silhouette_plot.png")  # Simpan plot
+    mlflow.log_artifact("silhouette_plot.png")  # Upload ke MLflow
+    print('\n')
+    plt.show()
+
+    # Tampilkan jumlah data pada setiap cluster
+    print("\nJumlah data per cluster:")
+    print(pre_df['cluster'].value_counts())
