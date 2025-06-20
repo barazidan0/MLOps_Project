@@ -21,9 +21,11 @@ pipeline {
             }
         }
 
-        stage('Test') {
+        stage('Test & MLflow Logging') {
             steps {
-                bat "python eda_of_netflix_dataset.py"
+                script {
+                    bat "docker run --rm -v %cd%:/app -w /app %DOCKER_IMAGE% python eda_of_netflix_dataset.py"
+                }
             }
         }
 
@@ -44,4 +46,3 @@ pipeline {
         }
     }
 }
-
